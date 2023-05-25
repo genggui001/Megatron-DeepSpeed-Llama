@@ -271,9 +271,7 @@ class LlamaParallelMLP(MegatronModule):
             enable_expert_tensor_parallelism=enable_expert_tensor_parallelism)
 
     def forward(self, hidden_states):
-        intermediate_parallel = self.gate_proj(hidden_states)[0] * self.up_proj(hidden_states)[0]
-
-        intermediate_parallel = self.activation_func(intermediate_parallel)
+        intermediate_parallel = self.activation_func(self.gate_proj(hidden_states)[0]) * self.up_proj(hidden_states)[0]
 
         output, _ = self.down_proj(intermediate_parallel)
         return output
