@@ -13,3 +13,8 @@ dist/
 
 # AML workspace config file
 *config.json
+model_dir/
+ds_config*
+hchinese_llama_tokenizer/
+.vscode/
+test.ipynb

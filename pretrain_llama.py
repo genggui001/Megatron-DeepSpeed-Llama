@@ -154,8 +154,8 @@ def get_batch_pipe(data):
     # Broadcast data.
     data_b = mpu.broadcast_data(keys, data, datatype)
 
-    # Unpack.
-    tokens_ = data_b['text'].long()
+    # Unpack. # 限制长度
+    tokens_ = data_b['text'].long()[:, :args.seq_length+1]
     labels = tokens_[:, 1:].contiguous()
     tokens = tokens_[:, :-1].contiguous()
 
@@ -242,5 +242,4 @@ def git_ds_info():
 if __name__ == "__main__":
     git_ds_info()
     pretrain(train_valid_test_datasets_provider, model_provider, forward_step,
-             args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
              data_post_process=data_post_process)

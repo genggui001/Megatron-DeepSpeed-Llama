@@ -20,7 +20,7 @@ from abc import abstractmethod
 
 from .bert_tokenization import FullTokenizer as FullBertTokenizer
 from .gpt2_tokenization import GPT2Tokenizer
-
+from transformers import AutoTokenizer
 
 def build_tokenizer(args):
     """Initialize tokenizer."""
@@ -41,6 +41,21 @@ def build_tokenizer(args):
     elif args.tokenizer_type == 'GPT2BPETokenizer':
         assert args.merge_file is not None
         tokenizer = _GPT2BPETokenizer(args.vocab_file, args.merge_file)
+    elif args.tokenizer_type == "PretrainedFromHF":
+        assert args.vocab_file is not None
+        # prevent transformers from logging info and warnings on each rank
+        import transformers
+        import logging
+        if args.rank == 0:
+            transformers.utils.logging.set_verbosity(logging.INFO)
+        else:
+            # shut the warnings on replicas
+            transformers.utils.logging.set_verbosity(logging.ERROR)
+
+        if args.rank == 0:
+            print(" vocab file is un-used. loading tokenizer from pre-trained model")
+        tokenizer = _AutoTokenizer(args.vocab_file, vocab_extra_ids=args.vocab_extra_ids)
+
     else:
         raise NotImplementedError('{} tokenizer is not '
                                   'implemented.'.format(args.tokenizer_type))
@@ -53,14 +68,25 @@ def build_tokenizer(args):
 
 
 def _vocab_size_with_padding(orig_vocab_size, args):
-    """Pad vocab size so it is divisible by model parallel size and
-    still having GPU friendly size."""
+    """Apply the requested rules to change the size of the vocabulary"""
+    if args.pad_vocab_size_to is not None:
+        if args.pad_vocab_size_to  < orig_vocab_size:
+            raise ValueError(
+                f"You asked to pad the vocabulary to {args.pad_vocab_size_to} when the initial vocabulary size is "
+                f"{orig_vocab_size}. You can only pad to a higher value."
+            )
 
-    after = orig_vocab_size
-    multiple = args.make_vocab_size_divisible_by * \
-        args.tensor_model_parallel_size
-    while (after % multiple) != 0:
-        after += 1
+        if args.make_vocab_size_divisible_by is not None and (args.pad_vocab_size_to % args.make_vocab_size_divisible_by) != 0:
+            raise ValueError(f"{args.pad_vocab_size_to} is not divisible by {args.make_vocab_size_divisible_by}")
+
+        after = args.pad_vocab_size_to
+    else:
+        # Pad vocab size so it is divisible by model parallel size and still having GPU friendly size.
+        after = orig_vocab_size
+        multiple = args.make_vocab_size_divisible_by * \
+            args.tensor_model_parallel_size
+        while (after % multiple) != 0:
+            after += 1
     if args.rank == 0:
         print(' > padded vocab (size: {}) with {} dummy tokens '
               '(new size: {})'.format(
@@ -289,3 +315,91 @@ class _GPT2BPETokenizer(AbstractTokenizer):
     @property
     def eod(self):
         return self.eod_id
+
+
+
+
+class _AutoTokenizer(AbstractTokenizer):
+    """AutoTokenizer for Hf Pretrained model loading."""
+
+    def __init__(self, tokenizer_name_or_path, vocab_extra_ids):
+        name = tokenizer_name_or_path
+        super().__init__(name)
+        hf_tokenizer_kwargs = {
+            "padding_side": 'right',
+            "use_fast": False,
+        }
+        if vocab_extra_ids > 0:
+            # TODO @thomasw21 we might need to concatenate to a pre-existing list?
+            hf_tokenizer_kwargs["additional_special_tokens"] = [f"<extra_id_{_id}>" for _id in range(vocab_extra_ids)]
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, **hf_tokenizer_kwargs)
+        self.encoder = self.tokenizer.get_vocab()
+        self.decoder = {v: k for k, v in self.encoder.items()}
+
+    @property
+    def vocab_size(self):
+        return len(self.tokenizer) # vocab_size doesn't contain additional tokens
+
+    @property
+    def vocab(self):
+        # TODO @thomasw21 make sure that special tokens don't collapse with vocab tokens.
+        return {
+            **{special_token: self.tokenizer.convert_tokens_to_ids(special_token) for special_token in self.tokenizer.additional_special_tokens},
+            **self.tokenizer.vocab,
+        }
+
+    @property
+    def inv_vocab(self):
+        return {v: k for k, v in self.vocab.items()}
+
+    def tokenize(self, text):
+        return self.tokenizer.encode(text)
+
+    def detokenize(self, token_ids):
+        return self.tokenizer.decode(token_ids)
+
+    @property
+    def eod(self):
+        # TODO @thomasw21 might conflict with <eos>
+        return self.eos
+
+    @property
+    def cls(self):
+        candidate = self.tokenizer.cls_token_id
+        return self._check_token_candidate(candidate)
+
+    @property
+    def sep(self):
+        candidate = self.tokenizer.sep_token_id
+        return self._check_token_candidate(candidate)
+
+    @property
+    def pad(self):
+        candidate = self.tokenizer.pad_token_id
+        return self._check_token_candidate(candidate)
+
+    @property
+    def mask(self):
+        candidate = self.tokenizer.mask_token_id
+        return self._check_token_candidate(candidate)
+
+    @property
+    def bos(self):
+        raise NotImplementedError("Missing <bos>")
+
+    @property
+    def eos(self):
+        # TODO @thomasw21 might conflict with the notion of <eod>
+        candidate = self.tokenizer.eos_token_id
+        return self._check_token_candidate(candidate)
+
+    @property
+    def additional_special_tokens_ids(self):
+        """ All the additional special tokens you may want to use (list of strings)."""
+        return self.tokenizer.additional_special_tokens_ids
+
+    @staticmethod
+    def _check_token_candidate(candidate):
+        if candidate is None:
+            raise AttributeError("Token doesn't exist")
+        return candidate

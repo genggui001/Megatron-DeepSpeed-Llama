@@ -37,6 +37,11 @@ import deepspeed
 from deepspeed.accelerator import get_accelerator
 from deepspeed.pipe import PipelineModule, LayerSpec
 
+try:
+    from xformers import ops as xops
+except ImportError:
+    xops = None
+
 
 class RotaryEmbedding(torch.nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
@@ -89,25 +94,28 @@ def apply_rotary_pos_emb(q, k, cos, sin, offset: int = 0):
 # Steps performed, 1. copy https://github.com/NVIDIA/apex/blob/master/apex/normalization/fused_layer_norm.py, https://github.com/NVIDIA/apex/blob/master/csrc/layer_norm_cuda.cpp, https://github.com/NVIDIA/apex/blob/master/csrc/layer_norm_cuda_kernel.cu to ./megatron/model/fused_layer_norm.py, ./megatron/fused_kernels/layer_norm_cuda.cpp, ./megatron/fused_kernels/layer_norm_cuda_kernel.cu, and update ./megatron/fused_kernels/__init__.py accordingly 2. use below line to import MixedFusedRMSNorm
 # torch.nn.LayerNorm is slower than apex.FusedLayerNorm for shapes typical in NLP models. For example: (512, 16, 1024) with normalization over the last dimension is slower using torch.nn.LayerNorm
 # from megatron.model.fused_layer_norm import MixedFusedRMSNorm as RMSNorm # for cuda
-class RMSNorm(torch.nn.Module):  # for cpu
-    def __init__(self, hidden_size, eps=1e-6):
-        """
-        LlamaRMSNorm is equivalent to T5LayerNorm
-        """
-        super().__init__()
-        self.weight = torch.nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
+if get_accelerator().device_name() == 'cuda':
+    from apex.normalization import FusedRMSNorm as RMSNorm
+else:
+    class RMSNorm(torch.nn.Module):  # for cpu
+        def __init__(self, hidden_size, eps=1e-6):
+            """
+            LlamaRMSNorm is equivalent to T5LayerNorm
+            """
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(hidden_size))
+            self.variance_epsilon = eps
 
-    def forward(self, hidden_states):
-        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        def forward(self, hidden_states):
+            variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+            hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
 
-        # convert into half-precision if necessary
-        if self.weight.dtype in [torch.float16, torch.bfloat16]:
-            hidden_states = hidden_states.to(self.weight.dtype)
-        hidden_states = self.weight * hidden_states
+            # convert into half-precision if necessary
+            if self.weight.dtype in [torch.float16, torch.bfloat16]:
+                hidden_states = hidden_states.to(self.weight.dtype)
+            hidden_states = self.weight * hidden_states
 
-        return hidden_states
+            return hidden_states
 
 
 class LlamaLMHead(MegatronModule):
@@ -243,6 +251,7 @@ class LlamaParallelMLP(MegatronModule):
             args.ffn_hidden_size,
             gather_output=False,
             init_method=self.init_method,
+            bias=False,
             skip_bias_add=True,
             moe=moe,
             enable_expert_tensor_parallelism=enable_expert_tensor_parallelism
@@ -253,6 +262,7 @@ class LlamaParallelMLP(MegatronModule):
             args.ffn_hidden_size,
             gather_output=False,
             init_method=self.init_method,
+            bias=False,
             skip_bias_add=True,
             moe=moe,
             enable_expert_tensor_parallelism=enable_expert_tensor_parallelism
@@ -266,6 +276,7 @@ class LlamaParallelMLP(MegatronModule):
             args.hidden_size,
             input_is_parallel=True,
             init_method=self.output_layer_init_method,
+            bias=False,
             skip_bias_add=True,
             moe=moe,
             enable_expert_tensor_parallelism=enable_expert_tensor_parallelism)
@@ -324,6 +335,8 @@ class LlamaParallelAttention(MegatronModule):
             self.query_key_value = mpu.ColumnParallelLinear(
                 args.hidden_size,
                 3 * projection_size,
+                bias=False,
+                skip_bias_add=True,
                 gather_output=False,
                 init_method=self.init_method)
 
@@ -350,7 +363,9 @@ class LlamaParallelAttention(MegatronModule):
             args.hidden_size,
             input_is_parallel=True,
             init_method=self.output_layer_init_method,
-            skip_bias_add=True)
+            bias=False,
+            skip_bias_add=True
+        )
 
         if deepspeed.checkpointing.is_configured():
             global get_cuda_rng_tracker, checkpoint
@@ -390,117 +405,129 @@ class LlamaParallelAttention(MegatronModule):
         cos, sin = self.rotary_emb(value_layer, seq_len=new_tensor_shape[0])
         query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin, offset=0)
 
-        # [b, np, sq, hn] --> [sq, b, np, hn] TODO optimize the permute of dimension back and forth
-        query_layer = query_layer.permute(2, 0, 1, 3).contiguous()
-        key_layer = key_layer.permute(2, 0, 1, 3).contiguous()
-        value_layer = value_layer.permute(2, 0, 1, 3).contiguous()
+        if xops is not None and layer_past is None:
+            query_states = query_layer.transpose(1, 2)
+            key_states = key_layer.transpose(1, 2)
+            value_states = value_layer.transpose(1, 2)
+            attn_output = xops.memory_efficient_attention(
+                query_states, key_states, value_states, 
+                attn_bias=xops.LowerTriangularMask(), p=0.0
+            )
+            # (b, sq, np, hn) —> [sq, b, np, hn]
+            context_layer = attn_output.permute(1, 0, 2, 3).contiguous()
 
-        # ==================================
-        # Adjust key and value for inference
-        # ==================================
+        else:
+            # [b, np, sq, hn] --> [sq, b, np, hn] TODO optimize the permute of dimension back and forth
+            query_layer = query_layer.permute(2, 0, 1, 3).contiguous()
+            key_layer = key_layer.permute(2, 0, 1, 3).contiguous()
+            value_layer = value_layer.permute(2, 0, 1, 3).contiguous()
 
-        if layer_past is not None:
-            past_key, past_value = layer_past
-            key_layer = torch.cat((past_key.type_as(key_layer),
-                                   key_layer), dim=0)
-            value_layer = torch.cat((past_value.type_as(value_layer),
-                                     value_layer), dim=0)
-        if get_key_value:
-            present = (key_layer, value_layer)
+            # ==================================
+            # Adjust key and value for inference
+            # ==================================
 
-        # ===================================
-        # Raw attention scores. [b, np, s, s]
-        # ===================================
+            if layer_past is not None:
+                past_key, past_value = layer_past
+                key_layer = torch.cat((past_key.type_as(key_layer),
+                                    key_layer), dim=0)
+                value_layer = torch.cat((past_value.type_as(value_layer),
+                                        value_layer), dim=0)
+            if get_key_value:
+                present = (key_layer, value_layer)
 
-        # [b, np, sq, sk]
-        output_size = (query_layer.size(1),
-                       query_layer.size(2),
-                       query_layer.size(0),
-                       key_layer.size(0))
+            # ===================================
+            # Raw attention scores. [b, np, s, s]
+            # ===================================
 
-        # [sq, b, np, hn] -> [sq, b * np, hn]
-        query_layer = query_layer.view(output_size[2],
-                                       output_size[0] * output_size[1], -1)
-        # [sk, b, np, hn] -> [sk, b * np, hn]
-        key_layer = key_layer.view(output_size[3],
-                                   output_size[0] * output_size[1], -1)
+            # [b, np, sq, sk]
+            output_size = (query_layer.size(1),
+                        query_layer.size(2),
+                        query_layer.size(0),
+                        key_layer.size(0))
 
-        # preallocting result tensor: [b * np, sq, sk]
-        matmul_result = torch.empty(
-            output_size[0] * output_size[1],
-            output_size[2],
-            output_size[3],
-            dtype=query_layer.dtype,
-            device=get_accelerator().current_device_name())
+            # [sq, b, np, hn] -> [sq, b * np, hn]
+            query_layer = query_layer.view(output_size[2],
+                                        output_size[0] * output_size[1], -1)
+            # [sk, b, np, hn] -> [sk, b * np, hn]
+            key_layer = key_layer.view(output_size[3],
+                                    output_size[0] * output_size[1], -1)
 
-        # Raw attention scores. [b * np, sq, sk]
-        matmul_result = torch.baddbmm(
-            matmul_result,
-            query_layer.transpose(0, 1),  # [b * np, sq, hn]
-            key_layer.transpose(0, 1).transpose(1, 2),  # [b * np, hn, sk]
-            beta=0.0, alpha=(1.0 / self.norm_factor))
+            # preallocting result tensor: [b * np, sq, sk]
+            matmul_result = torch.empty(
+                output_size[0] * output_size[1],
+                output_size[2],
+                output_size[3],
+                dtype=query_layer.dtype,
+                device=get_accelerator().current_device_name())
 
-        # change view to [b, np, sq, sk]
-        attention_scores = matmul_result.view(*output_size)
+            # Raw attention scores. [b * np, sq, sk]
+            matmul_result = torch.baddbmm(
+                matmul_result,
+                query_layer.transpose(0, 1),  # [b * np, sq, hn]
+                key_layer.transpose(0, 1).transpose(1, 2),  # [b * np, hn, sk]
+                beta=0.0, alpha=(1.0 / self.norm_factor))
 
-        # ==================================================
-        # Update attention mask for inference. [b, np, sq, sk]
-        # ==================================================
+            # change view to [b, np, sq, sk]
+            attention_scores = matmul_result.view(*output_size)
 
-        if get_key_value:
-            with torch.no_grad():
-                if layer_past is not None:
-                    attention_mask = attention_mask[
-                                     ...,
-                                     attention_scores.size(3) - 1,
-                                     :attention_scores.size(3)].unsqueeze(2)
-                else:
-                    attention_mask = attention_mask[
-                                     ...,
-                                     :attention_scores.size(3),
-                                     :attention_scores.size(3)]
+            # ==================================================
+            # Update attention mask for inference. [b, np, sq, sk]
+            # ==================================================
 
-        # ===========================
-        # Attention probs and dropout
-        # ===========================
+            if get_key_value:
+                with torch.no_grad():
+                    if layer_past is not None:
+                        attention_mask = attention_mask[
+                                        ...,
+                                        attention_scores.size(3) - 1,
+                                        :attention_scores.size(3)].unsqueeze(2)
+                    else:
+                        attention_mask = attention_mask[
+                                        ...,
+                                        :attention_scores.size(3),
+                                        :attention_scores.size(3)]
 
-        # attention scores and attention mask [b, np, sq, sk]
-        attention_probs = self.scale_mask_softmax(attention_scores,
-                                                  attention_mask)
+            # ===========================
+            # Attention probs and dropout
+            # ===========================
 
-        # =========================
-        # Context layer. [sq, b, hp]
-        # =========================
+            # attention scores and attention mask [b, np, sq, sk]
+            attention_probs = self.scale_mask_softmax(attention_scores,
+                                                    attention_mask)
 
-        # value_layer -> context layer.
-        # [sk, b, np, hn] --> [b, np, sq, hn]
+            # =========================
+            # Context layer. [sq, b, hp]
+            # =========================
 
-        # context layer shape: [b, np, sq, hn]
-        output_size = (value_layer.size(1),
-                       value_layer.size(2),
-                       query_layer.size(0),
-                       value_layer.size(3))
+            # value_layer -> context layer.
+            # [sk, b, np, hn] --> [b, np, sq, hn]
 
-        # change view [sk, b * np, hn]
-        value_layer = value_layer.view(value_layer.size(0),
-                                       output_size[0] * output_size[1], -1)
+            # context layer shape: [b, np, sq, hn]
+            output_size = (value_layer.size(1),
+                        value_layer.size(2),
+                        query_layer.size(0),
+                        value_layer.size(3))
 
-        # change view [b * np, sq, sk]
-        attention_probs = attention_probs.view(output_size[0] * output_size[1],
-                                               output_size[2], -1)
+            # change view [sk, b * np, hn]
+            value_layer = value_layer.view(value_layer.size(0),
+                                        output_size[0] * output_size[1], -1)
 
-        # matmul: [b * np, sq, hn]
-        context_layer = torch.bmm(attention_probs, value_layer.transpose(0, 1))
+            # change view [b * np, sq, sk]
+            attention_probs = attention_probs.view(output_size[0] * output_size[1],
+                                                output_size[2], -1)
 
-        # change view [b, np, sq, hn]
-        context_layer = context_layer.view(*output_size)
+            # matmul: [b * np, sq, hn]
+            context_layer = torch.bmm(attention_probs, value_layer.transpose(0, 1))
 
-        # [b, np, sq, hn] --> [sq, b, np, hn]
-        context_layer = context_layer.permute(2, 0, 1, 3).contiguous()
+            # change view [b, np, sq, hn]
+            context_layer = context_layer.view(*output_size)
+
+            # [b, np, sq, hn] --> [sq, b, np, hn]
+            context_layer = context_layer.permute(2, 0, 1, 3).contiguous()
 
         # [sq, b, np, hn] --> [sq, b, hp]
         new_context_layer_shape = context_layer.size()[:-2] + \
-                                  (self.hidden_size_per_partition,)
+                                (self.hidden_size_per_partition,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
         # =================
@@ -852,7 +879,7 @@ class LlamaModelPipe(PipelineModule, MegatronModule):
         self.specs.append(LayerSpec(RMSNorm, args.hidden_size, eps=args.layernorm_epsilon))
 
         self.specs.append(
-            LayerSpec(LlamaLMHeadPipe, hidden_size=args.hidden_size, vocab_size=padded_vocab_size,
+            LayerSpec(LlamaLMHeadPipe, hidden_size=args.hidden_size, vocab_size=args.padded_vocab_size,
                       init_method=self.init_method, parallel_output=self.parallel_output)
         )
 
@@ -870,11 +897,16 @@ class LlamaModelPipe(PipelineModule, MegatronModule):
                                              num_mp=mpu.get_tensor_model_parallel_world_size(),
                                              num_dp=mpu.get_data_parallel_world_size())
 
-        super().__init__(layers=self.specs,
-                         loss_fn=CrossEntropy,
-                         topology=topo,
-                         activation_checkpoint_interval=interval,
-                         partition_method='type:transformer')
+        super().__init__(
+            layers=self.specs,
+            loss_fn=CrossEntropy,
+            topology=topo,
+            activation_checkpoint_interval=interval,
+            partition_method='type:transformer',
+            checkpointable_layers=[
+                'LlamaParallelTransformerLayerPipe'
+            ]
+        )
 
 
 class LlamaModel(MegatronModule):

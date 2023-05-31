@@ -39,19 +39,28 @@ def scaled_init_method_normal(sigma, num_layers):
     return init_
 
 
-def attention_mask_func(attention_scores, attention_mask):
-    args = get_args()
-    if args.curriculum_learning_legacy or args.data_efficiency_curriculum_learning:
-        attention_mask_ = attention_mask
-        actual_seqlen = attention_scores.size()[2]
-        if actual_seqlen != attention_mask_.size()[2]:
-            # attention_mask has size [1, 1, seqlen, seqlen]
-            attention_mask_ = attention_mask_[:, :, :actual_seqlen, :actual_seqlen].contiguous()
-        attention_scores.masked_fill_(attention_mask_, -10000.0)
-    else:
-        attention_scores.masked_fill_(attention_mask, -10000.0)
-    return attention_scores
+# def attention_mask_func(attention_scores, attention_mask):
+#     args = get_args()
+#     if args.curriculum_learning_legacy or args.data_efficiency_curriculum_learning:
+#         attention_mask_ = attention_mask
+#         actual_seqlen = attention_scores.size()[2]
+#         if actual_seqlen != attention_mask_.size()[2]:
+#             # attention_mask has size [1, 1, seqlen, seqlen]
+#             attention_mask_ = attention_mask_[:, :, :actual_seqlen, :actual_seqlen].contiguous()
+#         attention_scores.masked_fill_(attention_mask_, -10000.0)
+#     else:
+#         attention_scores.masked_fill_(attention_mask, -10000.0)
+#     return attention_scores
 
+def attention_mask_func(attention_scores, attention_mask):
+    attention_mask_ = attention_mask
+    actual_qseqlen = attention_scores.size()[2]
+    actual_kseqlen = attention_scores.size()[3]
+    if actual_qseqlen != attention_mask_.size()[2] or actual_kseqlen != attention_mask_.size()[3]:
+        # attention_mask has size [1, 1, seqlen, seqlen]
+        attention_mask_ = attention_mask_[:, :, :actual_qseqlen, :actual_kseqlen].contiguous()
+    attention_scores.masked_fill_(attention_mask_, -10000.0)
+    return attention_scores
 
 def get_linear_layer(rows, columns, init_method):
     """Simple linear layer with weight initialization."""

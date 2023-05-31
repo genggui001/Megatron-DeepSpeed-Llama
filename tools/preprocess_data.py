@@ -105,7 +105,7 @@ def get_args():
     group = parser.add_argument_group(title='tokenizer')
     group.add_argument('--tokenizer-type', type=str, required=True,
                        choices=['BertWordPieceLowerCase','BertWordPieceCase',
-                                'GPT2BPETokenizer'],
+                                'GPT2BPETokenizer', 'PretrainedFromHF'],
                        help='What type of tokenizer to use.')
     group.add_argument('--vocab-file', type=str, default=None,
                        help='Path to the vocab file')
@@ -113,7 +113,10 @@ def get_args():
                        help='Path to the BPE merge file (if necessary).')
     group.add_argument('--append-eod', action='store_true',
                        help='Append an <eod> token to the end of a document.')
-
+    group.add_argument('--pad-vocab-size-to', type=int, default=None,
+                        help='Pad the vocab size to this value.'
+                        'This value must be greater than the initial size of the tokenizer'
+                        ', needs to be divisible by TP size and `make-vocab-size-divisible-by`.')
 
     group = parser.add_argument_group(title='output data')
     group.add_argument('--output-prefix', type=str, required=True,
