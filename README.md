@@ -29,7 +29,7 @@ pip install https://github.com/NVIDIA/apex/archive/8b7a1ff183741dd8f9b87e7bafd04
 #### decapoda-research/llama
 原始权重：[decapoda-research](https://huggingface.co/decapoda-research)
 
-[decapoda-research/llama-7b](https://huggingface.co/genggui001/decapoda-research-llama-7b-megatron-states)
+[decapoda-research-llama-7b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-7b-megatron-states)
 
 loss on commoncrawl (和论文基本一致)
 ```
@@ -39,7 +39,7 @@ iteration        1/   73728 | consumed samples:          128 | consumed tokens: 
 #### Chinese-LLaMA-Plus
 原始权重：[Chinese-LLaMA-Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca)
 
-[Chinese-LLaMA-Plus-7b](https://huggingface.co/genggui001/chinese-llama-plus-7b-megatron-states)
+[chinese-llama-plus-7b-megatron-states](https://huggingface.co/genggui001/chinese-llama-plus-7b-megatron-states)
 
 loss on zh-cn_wikipedia_text (略高原因不明)
 ```
