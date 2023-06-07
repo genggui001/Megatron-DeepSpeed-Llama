@@ -27,22 +27,29 @@ pip install https://github.com/NVIDIA/apex/archive/8b7a1ff183741dd8f9b87e7bafd04
 ### 2. 已经转化好格式的预训练权重
 
 #### decapoda-research/llama
+原始权重：[decapoda-research](https://huggingface.co/decapoda-research)
 
-[7b](https://huggingface.co/genggui001/decapoda-research-llama-7b-megatron-states)
+[decapoda-research/llama-7b](https://huggingface.co/genggui001/decapoda-research-llama-7b-megatron-states)
 
-loss on commoncrawl
+loss on commoncrawl (和论文基本一致)
 ```
 iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 65067.1 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 1.831802E+00 | loss scale: 4096.0 | grad norm: 0.588 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.967 | TFLOPs: 28.52 |  
 ```
 
 #### Chinese-LLaMA-Plus
+原始权重：[Chinese-LLaMA-Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca)
 
+[Chinese-LLaMA-Plus-7b](https://huggingface.co/genggui001/chinese-llama-plus-7b-megatron-states)
 
+loss on zh-cn_wikipedia_text (略高原因不明)
+```
+iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 65787.8 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 3.341448E+00 | loss scale: 4096.0 | grad norm: 5.496 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.946 | TFLOPs: 28.42 |
+```
 
-
-
-等我ing
-
+loss on commoncrawl (同样略高 英文遗忘的不少)
+```
+iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 66938.9 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 2.483702E+00 | loss scale: 4096.0 | grad norm: 3.814 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.912 | TFLOPs: 27.94 |
+```
 
 ### 3. 数据预处理
 ```

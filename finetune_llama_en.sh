@@ -68,7 +68,7 @@ mkdir -p $LOGS_PATH
 
 KILL_SWITCH_PATH=$REPO_PATH/kill-switch
 
-DATA_PATH="/mnt/data/smart_health_02/xuekui/dataset/test/pretrain_data/en/common_crawl_2019_30_tmp_text_document"
+DATA_PATH="/mnt/data/smart_health_02/xuekui/dataset/pretrain_data/en/common_crawl_2019_30_tmp_text_document"
 TOKENIZER_NAME_OR_PATH=$LOAD_CHECKPOINT_PATH/tokenizer
 
 
