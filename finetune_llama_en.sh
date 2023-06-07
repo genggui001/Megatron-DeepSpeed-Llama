@@ -1,28 +1,29 @@
 #!/bin/bash
 
-export NV_LIBNCCL_DEV_PACKAGE=libnccl-dev=
-export NV_LIBNCCL_DEV_PACKAGE_VERSION=libnccl-dev=
+export NV_LIBNCCL_DEV_PACKAGE=
+export NV_LIBNCCL_DEV_PACKAGE_VERSION=
 export NV_LIBNCCL_DEV_PACKAGE_NAME=
 export NV_LIBNCCL_PACKAGE=
 export NV_LIBNCCL_PACKAGE_NAME=
 export NV_LIBNCCL_PACKAGE_VERSION=
 
-
+# 单节点 bug
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 SLURM_NNODES=1
 SLURM_PROCID=0
 NNODES=1
-GPUS_PER_NODE=4
+GPUS_PER_NODE=8
 SLURM_JOB_ID=23333
 MASTER_ADDR=localhost
 MASTER_PORT=46282
 
+# 多节点 srun
 # export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 # echo "MASTER_ADDR: " $MASTER_ADDR
 # export MASTER_PORT=$(expr 45000 + $(echo -n $SLURM_JOBID | tail -c 4))
 # echo "MASTER_PORT: " $MASTER_PORT
 
-# GPUS_PER_NODE=8
+# GPUS_PER_NODE=4
 # NNODES=$SLURM_NNODES
 
 # echo "NNODES: " $NNODES
@@ -34,6 +35,7 @@ MASTER_PORT=46282
 #export WORLD_SIZE=$(($SLURM_NNODES * $SLURM_NTASKS_PER_NODE))
 #echo "WORLD_SIZE: " $WORLD_SIZE
 
+
 # do not remove or the training will hang and nodes will be lost w/o this workaround
 export CUDA_LAUNCH_BLOCKING=1
 
@@ -43,12 +45,11 @@ export TORCHELASTIC_ERROR_FILE=/tmp/torch-elastic-error-genggui001.json
 # force crashing on nccl issues like hanging broadcast
 export NCCL_ASYNC_ERROR_HANDLING=1
 
-
-
 # defining the right environment variables
 export HF_DATASETS_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-# export PATH="/mnt/petrelfs/share/gcc/gcc-7.5.0/bin:/mnt/petrelfs/share/cuda-11.3/bin:$PATH"
+export PATH="/root/miniconda3/envs/torch1.13/bin:$PATH"
+
 
 START_DATE=$(date "+%Y_%m_%d_%H:%M:%S")
 
@@ -56,9 +57,9 @@ echo "START TIME: $START_DATE"
 
 variant=main
 
-LOAD_CHECKPOINT_PATH=/mnt/petrelfs/xuekui/code/BLOOM-Megatron-DeepSpeed-175b-all-finetune/pretrain_weights/bloomz-mt
+LOAD_CHECKPOINT_PATH=/mnt/data/smart_health_02/xuekui/pretrain_weights/nlp/decapoda-research-llama-7b-megatron-states
 
-DATA_OUTPUT_PATH=/mnt/petrelfs/xuekui/code/BLOOM-Megatron-DeepSpeed-175b-all-finetune/model_dir/bloomz-mt
+DATA_OUTPUT_PATH=./model_dir/llama_7b_en
 CHECKPOINT_PATH=$DATA_OUTPUT_PATH/checkpoints/$variant
 REPO_PATH=$DATA_OUTPUT_PATH/experiment
 TENSORBOARD_PATH=$REPO_PATH/tensorboard/$variant
@@ -67,36 +68,38 @@ mkdir -p $LOGS_PATH
 
 KILL_SWITCH_PATH=$REPO_PATH/kill-switch
 
-DATA_PATH="/mnt/petrelfs/xuekui/dataset/nlp/chatgpt_sft_copy/all/"
-TOKENIZER_NAME_OR_PATH="./bigscience_bloom_tokenizer"
+DATA_PATH="/mnt/data/smart_health_02/xuekui/dataset/test/pretrain_data/en/common_crawl_2019_30_tmp_text_document"
+TOKENIZER_NAME_OR_PATH=$LOAD_CHECKPOINT_PATH/tokenizer
 
 
 TP_SIZE=2
-PP_SIZE=24
+PP_SIZE=4
 
 MICRO_BATCH_SIZE=1  # was MBS=1 till GBS=784
-GLOBAL_BATCH_SIZE=256  # 4.2M tokens. It is larger than the initial plan of 3.2M tokens to get higher throughput
+GLOBAL_BATCH_SIZE=128  # 4.2M tokens. It is larger than the initial plan of 3.2M tokens to get higher throughput
 
-NHIDDEN=14336
-NLAYERS=70
-NHEADS=112
+NHIDDEN=4096
+FFN_HIDDEN_SIZE=11008
+NLAYERS=32
+NHEADS=32
 SEQ_LEN=2048
+
+SP=12
 
 ADAPTER_SIZE=0
 SAVE_INTERVAL=256
 
-TRAIN_SAMPLES=18_874_368  # 450B tokens
-LR_DECAY_SAMPLES=18_874_368  # Decay for the first 410B tokens then continue at fixed --min-lr
-LR_WARMUP_SAMPLES=0  # 375M tokens
-
+TRAIN_SAMPLES=9_437_184  # 450B tokens
+LR_DECAY_SAMPLES=8_437_120  # Decay for the first 410B tokens then continue at fixed --min-lr
+LR_WARMUP_SAMPLES=64  # 375M tokens
 
 OPTIMIZER_ARGS=" \
     --optimizer adam \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
-    --lr 6.03e-6 \
-    --min-lr 6.03e-7 \
+    --lr 6e-5 \
+    --min-lr 6e-6 \
     --lr-decay-style cosine \
     --lr-decay-samples $LR_DECAY_SAMPLES \
     --lr-warmup-samples $LR_WARMUP_SAMPLES \
@@ -110,11 +113,9 @@ EXIT_OPTS=" \
     "
 
 GPT_ARGS=" \
-    --pp-partition-method 'type:transformer|embedding' \
     --num-layers $NLAYERS \
     --hidden-size $NHIDDEN \
-    --adapter-size $ADAPTER_SIZE \
-    --not-optimize-emb \
+    --ffn-hidden-size $FFN_HIDDEN_SIZE \
     --num-attention-heads $NHEADS \
     --seq-length $SEQ_LEN \
     --max-position-embeddings $SEQ_LEN \
@@ -122,16 +123,13 @@ GPT_ARGS=" \
     --global-batch-size $GLOBAL_BATCH_SIZE \
     --train-samples $TRAIN_SAMPLES \
     --tokenizer-type PretrainedFromHF \
-    --tokenizer-name-or-path $TOKENIZER_NAME_OR_PATH \
+    --vocab-file $TOKENIZER_NAME_OR_PATH \
+    --loss-scale $SP \
     --init-method-std 0.0048 \
-    --embed-layernorm \
-    --bf16 \
+    --fp16 \
     --seed 42 \
-    --position-embedding-type alibi \
     --checkpoint-activations \
-    --abort-on-unmet-fused-kernel-constraints \
-    --kill-switch-path $KILL_SWITCH_PATH \
-    --pad-vocab-size-to 250880 \
+    --pad-vocab-size-to 32128 \
     $OPTIMIZER_ARGS \
     $EXIT_OPTS \
     "
@@ -140,7 +138,6 @@ GPT_ARGS=" \
 
 OUTPUT_ARGS=" \
     --log-interval 1 \
-    --save-total-limit 2 \
     --save-interval $SAVE_INTERVAL \
     --eval-interval $SAVE_INTERVAL \
     --eval-iters 32 \
@@ -151,7 +148,7 @@ OUTPUT_ARGS=" \
     --log-validation-ppl-to-tensorboard \
     "
 
-ZERO_STAGE=0 # important: bf16 must use z0! it implements its own zero stage 1 equivalent
+ZERO_STAGE=1
 
 config_json="./ds_config.$SLURM_JOB_ID.json"
 
@@ -164,8 +161,16 @@ cat <<EOT > $config_json
   "zero_optimization": {
     "stage": $ZERO_STAGE
   },
-  "bf16": {
-    "enabled": true
+  "checkpoint": {
+    "load_universal": false
+  },
+  "fp16": {
+    "enabled": true,
+    "loss_scale": 0,
+    "loss_scale_window": 500,
+    "hysteresis": 2,
+    "min_loss_scale": 1,
+    "initial_scale_power": $SP
   },
   "steps_per_print": 2000,
   "wall_clock_breakdown": false
@@ -190,15 +195,15 @@ export LAUNCHER="python -u -m torch.distributed.run \
     "
 
 export CMD=" \
-    finetune_dig_gpt.py \
+    pretrain_llama.py \
     --tensor-model-parallel-size $TP_SIZE \
     --pipeline-model-parallel-size $PP_SIZE \
     $GPT_ARGS \
     $OUTPUT_ARGS \
     --save $CHECKPOINT_PATH \
-    --load /mnt/petrelfs/xuekui/code/BLOOM-Megatron-DeepSpeed-175b-all-finetune/model_dir/bloomz-mt/checkpoints/main_no_opt/ \
+    --load $LOAD_CHECKPOINT_PATH \
+    --finetune \
     --data-path $DATA_PATH \
-    --skip-train-iteration-range 30208-37760 \
     --distributed-backend nccl \
      $DEEPSPEED_ARGS \
     "
@@ -232,10 +237,10 @@ export CMD=" \
 
 # echo "$LAUNCHER --node_rank $SLURM_PROCID $CMD" 
 
-echo "$LAUNCHER --node_rank $SLURM_PROCID $CMD" > $LOGS_PATH/main_${SLURM_PROCID}_log.txt
+echo "$LAUNCHER --node_rank $SLURM_PROCID $CMD" > $LOGS_PATH/main_${SLURM_PROCID}.log
 
-echo "-----------------------------------------------" > $LOGS_PATH/main_${SLURM_PROCID}_log.txt
+echo "-----------------------------------------------" > $LOGS_PATH/main_${SLURM_PROCID}.log
 
-bash -c "$LAUNCHER --node_rank $SLURM_PROCID $CMD" 2>&1 | tee -a $LOGS_PATH/main_${SLURM_PROCID}_log.txt
+bash -c "$LAUNCHER --node_rank $SLURM_PROCID $CMD" 2>&1 | tee -a $LOGS_PATH/main_${SLURM_PROCID}.log
 
 

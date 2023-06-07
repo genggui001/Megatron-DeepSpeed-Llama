@@ -56,9 +56,9 @@ echo "START TIME: $START_DATE"
 
 variant=main
 
-# LOAD_CHECKPOINT_PATH=/mnt/petrelfs/xuekui/code/BLOOM-Megatron-DeepSpeed-175b-all-finetune/pretrain_weights/bloomz-mt
+LOAD_CHECKPOINT_PATH=/mnt/data/smart_health_02/xuekui/pretrain_weights/nlp/chinese-llama-plus-7b-megatron-states
 
-DATA_OUTPUT_PATH=./model_dir/llama_7b
+DATA_OUTPUT_PATH=./model_dir/llama_7b_zh
 CHECKPOINT_PATH=$DATA_OUTPUT_PATH/checkpoints/$variant
 REPO_PATH=$DATA_OUTPUT_PATH/experiment
 TENSORBOARD_PATH=$REPO_PATH/tensorboard/$variant
@@ -86,11 +86,11 @@ SEQ_LEN=2048
 SP=12
 
 ADAPTER_SIZE=0
-SAVE_INTERVAL=16
+SAVE_INTERVAL=256
 
-TRAIN_SAMPLES=220_000_000  # 450B tokens
-LR_DECAY_SAMPLES=200_000_000  # Decay for the first 410B tokens then continue at fixed --min-lr
-LR_WARMUP_SAMPLES=183_105  # 375M tokens
+TRAIN_SAMPLES=9_437_184  # 450B tokens
+LR_DECAY_SAMPLES=8_437_120  # Decay for the first 410B tokens then continue at fixed --min-lr
+LR_WARMUP_SAMPLES=64  # 375M tokens
 
 OPTIMIZER_ARGS=" \
     --optimizer adam \
@@ -161,7 +161,7 @@ cat <<EOT > $config_json
     "stage": $ZERO_STAGE
   },
   "checkpoint": {
-    "load_universal": true
+    "load_universal": false
   },
   "fp16": {
     "enabled": true,
@@ -200,9 +200,8 @@ export CMD=" \
     $GPT_ARGS \
     $OUTPUT_ARGS \
     --save $CHECKPOINT_PATH \
-    --load /mnt/data/smart_health_02/xuekui/pretrain_weights/nlp/chinese-llama-plus-7b-megatron-states \
+    --load $LOAD_CHECKPOINT_PATH \
     --finetune \
-    --universal-checkpoint \
     --data-path $DATA_PATH \
     --distributed-backend nccl \
      $DEEPSPEED_ARGS \

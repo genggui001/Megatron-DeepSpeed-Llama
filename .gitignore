@@ -16,5 +16,6 @@ dist/
 model_dir/
 ds_config*
 hchinese_llama_tokenizer/
+llama_tokenizer/
 .vscode/
-test.ipynb
+test*.ipynb
