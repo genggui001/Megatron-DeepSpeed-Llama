@@ -33,7 +33,28 @@ pip install https://github.com/NVIDIA/apex/archive/8b7a1ff183741dd8f9b87e7bafd04
 
 loss on commoncrawl (和论文基本一致)
 ```
-iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 65067.1 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 1.831802E+00 | loss scale: 4096.0 | grad norm: 0.588 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.967 | TFLOPs: 28.52 |  
+validation loss at the end of training for val data | lm loss value: 1.795973E+00 | lm loss PPL: 6.025333E+00 |
+```
+
+[decapoda-research-llama-13b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-13b-megatron-states)
+
+loss on commoncrawl (和论文基本一致)
+```
+validation loss at the end of training for val data | lm loss value: 1.709547E+00 | lm loss PPL: 5.526456E+00 |
+```
+
+[decapoda-research-llama-30b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-30b-megatron-states)
+
+loss on commoncrawl (和论文基本一致)
+```
+validation loss at the end of training for val data | lm loss value: 1.579006E+00 | lm loss PPL: 4.850134E+00 |
+```
+
+[decapoda-research-llama-65b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-65b-megatron-states)
+
+loss on commoncrawl (和论文基本一致)
+```
+validation loss at the end of training for val data | lm loss value: 1.519600E+00 | lm loss PPL: 4.570395E+00 |
 ```
 
 #### Chinese-LLaMA-Plus
@@ -43,12 +64,12 @@ iteration        1/   73728 | consumed samples:          128 | consumed tokens: 
 
 loss on zh-cn_wikipedia_text (略高原因不明)
 ```
-iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 65787.8 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 3.341448E+00 | loss scale: 4096.0 | grad norm: 5.496 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.946 | TFLOPs: 28.42 |
+validation loss at the end of training for val data | lm loss value: 3.349298E+00 | lm loss PPL: 2.848272E+01 |
 ```
 
 loss on commoncrawl (同样略高 英文遗忘的不少)
 ```
-iteration        1/   73728 | consumed samples:          128 | consumed tokens:       262144 | elapsed time per iteration (ms): 66938.9 | learning rate: 6.000E-05 | global batch size:   128 | lm loss: 2.483702E+00 | loss scale: 4096.0 | grad norm: 3.814 | num zeros: 0.0 | actual seqlen:  2048 | number of skipped iterations:   0 | number of nan iterations:   0 | samples per second: 1.912 | TFLOPs: 27.94 |
+validation loss at the end of training for val data | lm loss value: 2.483371E+00 | lm loss PPL: 1.198159E+01 | 
 ```
 
 ### 3. 数据预处理
