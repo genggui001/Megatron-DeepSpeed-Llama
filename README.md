@@ -18,6 +18,7 @@ conda env create -f torch1.13.yml
 
 # 编译安装deepspeed定制版
 git clone -b v0.8.0_genggui001 https://github.com/genggui001/DeepSpeed.git
+cd DeepSpeed
 DS_BUILD_OPS=1 pip install . --global-option="build_ext" --global-option="-j1" --no-cache -v --disable-pip-version-check
 
 # 编译安装apex
