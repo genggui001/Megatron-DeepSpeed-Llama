@@ -27,7 +27,7 @@ pip install https://github.com/NVIDIA/apex/archive/8b7a1ff183741dd8f9b87e7bafd04
 
 ### 2. 已经转化好格式的预训练权重
 
-#### decapoda-research/llama
+#### (1) decapoda-research/llama
 原始权重：[decapoda-research](https://huggingface.co/decapoda-research)
 
 [decapoda-research-llama-7b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-7b-megatron-states)
@@ -58,7 +58,7 @@ loss on commoncrawl (和论文基本一致)
 validation loss at the end of training for val data | lm loss value: 1.519600E+00 | lm loss PPL: 4.570395E+00 |
 ```
 
-#### Chinese-LLaMA-Plus
+#### (2) Chinese-LLaMA-Plus
 原始权重：[Chinese-LLaMA-Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca)
 
 [chinese-llama-plus-7b-megatron-states](https://huggingface.co/genggui001/chinese-llama-plus-7b-megatron-states)
@@ -72,6 +72,19 @@ loss on commoncrawl (同样略高 英文遗忘的不少)
 ```
 validation loss at the end of training for val data | lm loss value: 2.483371E+00 | lm loss PPL: 1.198159E+01 | 
 ```
+
+[chinese-llama-plus-13b-megatron-states](https://huggingface.co/genggui001/chinese-llama-plus-13b-megatron-states)
+
+loss on zh-cn_wikipedia_text (略高原因不明)
+```
+validation loss at the end of training for val data | lm loss value: 3.304647E+00 | lm loss PPL: 2.723893E+01 |
+```
+
+loss on commoncrawl (同样略高 英文遗忘的不少)
+```
+validation loss at the end of training for val data | lm loss value: 2.443433E+00 | lm loss PPL: 1.151250E+01 |
+```
+
 
 ### 3. 数据预处理
 ```
