@@ -19,3 +19,5 @@ hchinese_llama_tokenizer/
 llama_tokenizer/
 .vscode/
 test*.ipynb
+eval_loss_pj_chinese_llama-hf_13b.sh
+

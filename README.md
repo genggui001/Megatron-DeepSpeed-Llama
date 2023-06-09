@@ -34,7 +34,8 @@ pip install https://github.com/NVIDIA/apex/archive/8b7a1ff183741dd8f9b87e7bafd04
 
 loss on commoncrawl (和论文基本一致)
 ```
-validation loss at the end of training for val data | lm loss value: 1.795973E+00 | lm loss PPL: 6.025333E+00 |
+validation loss at the end of training for val data | lm loss value: 1.795973E+00 | lm loss PPL: 6.025333E+00 | (fp16)
+validation loss at the end of training for val data | lm loss value: 1.796358E+00 | lm loss PPL: 6.027656E+00 | (bf16)
 ```
 
 [decapoda-research-llama-13b-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-13b-megatron-states)
@@ -83,6 +84,20 @@ validation loss at the end of training for val data | lm loss value: 3.304647E+0
 loss on commoncrawl (同样略高 英文遗忘的不少)
 ```
 validation loss at the end of training for val data | lm loss value: 2.443433E+00 | lm loss PPL: 1.151250E+01 |
+```
+
+#### (3) Linly OpenLLaMA
+原始权重：[Linly OpenLLaMA](https://github.com/CVI-SZU/Linly)
+
+
+loss on zh-cn_wikipedia_text
+```
+validation loss at the end of training for val data | lm loss value: 4.361165E+00 | lm loss PPL: 7.834836E+01 |
+```
+
+loss on commoncrawl
+```
+validation loss at the end of training for test data | lm loss value: 3.604808E+00 | lm loss PPL: 3.677462E+01 | 
 ```
 
 
