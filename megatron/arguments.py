@@ -631,6 +631,9 @@ def _add_mixed_precision_args(parser):
                        help='Run attention masking and softmax in fp32. '
                        'This flag is ignored unless '
                        '--no-query-key-layer-scaling is specified.')
+    group.add_argument('--no-use-flash-attention', action='store_false',
+                       help='not use flash attention',
+                       dest='apply_use_flash_attention')
     group.add_argument('--accumulate-allreduce-grads-in-fp32',
                        action='store_true',
                        help='Gradient accumulation and all-reduce in fp32.')

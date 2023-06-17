@@ -309,6 +309,7 @@ class LlamaParallelAttention(MegatronModule):
         self.bf16 = args.bf16
 
         self.apply_query_key_layer_scaling = args.apply_query_key_layer_scaling
+        self.apply_use_flash_attention = args.apply_use_flash_attention
         self.attention_softmax_in_fp32 = args.attention_softmax_in_fp32
         if self.apply_query_key_layer_scaling:
             self.attention_softmax_in_fp32 = True
@@ -405,7 +406,7 @@ class LlamaParallelAttention(MegatronModule):
         cos, sin = self.rotary_emb(value_layer, seq_len=new_tensor_shape[0])
         query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin, offset=0)
 
-        if xops is not None and layer_past is None:
+        if self.apply_use_flash_attention == True and xops is not None and layer_past is None:
             query_states = query_layer.transpose(1, 2)
             key_states = key_layer.transpose(1, 2)
             value_states = value_layer.transpose(1, 2)
@@ -415,7 +416,6 @@ class LlamaParallelAttention(MegatronModule):
             )
             # (b, sq, np, hn) —> [sq, b, np, hn]
             context_layer = attn_output.permute(1, 0, 2, 3).contiguous()
-
         else:
             # [b, np, sq, hn] --> [sq, b, np, hn] TODO optimize the permute of dimension back and forth
             query_layer = query_layer.permute(2, 0, 1, 3).contiguous()

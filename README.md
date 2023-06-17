@@ -89,6 +89,7 @@ validation loss at the end of training for val data | lm loss value: 2.443433E+0
 #### (3) Linly OpenLLaMA
 原始权重：[Linly OpenLLaMA](https://github.com/CVI-SZU/Linly)
 
+[OpenLLaMA-13B-megatron-states](https://huggingface.co/genggui001/OpenLLaMA-13B-megatron-states)
 
 loss on zh-cn_wikipedia_text
 ```
@@ -100,6 +101,20 @@ loss on commoncrawl
 validation loss at the end of training for test data | lm loss value: 3.604808E+00 | lm loss PPL: 3.677462E+01 | 
 ```
 
+#### (4) baichuan-inc (这个目前最nb)
+原始权重：[baichuan-inc](https://huggingface.co/baichuan-inc)
+
+[baichuan-7B-hf-megatron-states](https://huggingface.co/genggui001/baichuan-7B-hf-megatron-states)
+
+loss on zh-cn_wikipedia_text
+```
+validation loss at the end of training for val data | lm loss value: 2.416811E+00 | lm loss PPL: 1.121005E+01 | 
+```
+
+loss on commoncrawl
+```
+validation loss at the end of training for val data | lm loss value: 1.789027E+00 | lm loss PPL: 5.983629E+00 | 
+```
 
 ### 3. 数据预处理
 ```
