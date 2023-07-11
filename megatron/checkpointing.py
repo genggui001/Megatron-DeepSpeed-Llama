@@ -21,6 +21,9 @@ import sys
 import numpy as np
 from deepspeed.accelerator import get_accelerator
 import torch
+from glob import glob
+import re
+import shutil
 
 from megatron import (get_args,
                       is_rank_0,
@@ -194,6 +197,34 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
     # Wait so everyone is done (not necessary)
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
+
+    if args.save_total_limit > 0:
+        if is_rank_0():
+            checkpoint_path_iterations = []
+
+            for checkpoint_path in glob(os.path.join(args.save, "global_step*")):
+                try:
+                    iteration = re.search(r"global_step(\d+)$", checkpoint_path)
+                    if iteration is None:
+                        iteration = 0
+                    else:
+                        iteration = int(iteration.group(1))
+                except:
+                    iteration = 0
+                
+                checkpoint_path_iterations.append((iteration, checkpoint_path))
+
+            checkpoint_path_iterations = sorted(checkpoint_path_iterations, key=lambda x:x[0])
+
+            while len(checkpoint_path_iterations) > args.save_total_limit:
+                print_rank_0('Delete Checkpoint ' + checkpoint_path_iterations[0][1])
+                shutil.rmtree(checkpoint_path_iterations[0][1], ignore_errors=True)
+                checkpoint_path_iterations.pop(0)
+                
+    # Wait so everyone is done (not necessary)
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+
 
 def _transpose_first_dim(t, num_splits, num_splits_first, model):
     input_shape = t.size()

@@ -215,6 +215,154 @@ def pretrain(train_valid_test_dataset_provider,
                                    test_data_iterator, model,
                                    0, True, test=True)
 
+def pretrain_with_dataloader(train_valid_test_dataloader_provider,
+             model_provider,
+             forward_step_func,
+             extra_args_provider=None,
+             args_defaults={},
+             data_post_process=None):
+    """Main training program.
+
+    This function will run the followings in the order provided:
+        1) initialize Megatron.
+        2) setup model, optimizer and lr schedule using the model_provider.
+        3) call train_val_test_data_provider to get train/val/test datasets.
+        4) train the modle using the forward_step_func.
+
+    Arguments:
+        train_valid_test_dataset_provider: a function that takes the size of
+            train/valid/test dataset and returns `train, valid, test` datasets.
+        model_provider: a function that returns a vanilla version of the
+            model. By vanilla we mean a simple model on cpu with no fp16 or ddp.
+        forward_step_func: a function that takes a `data iterator` and `model`,
+            and returns a `loss` scalar with a dictionary with key:values being
+            the info we would like to monitor during training, for example
+            `lm-loss: value`. We also require that this function add
+            `batch generator` to the timers class.
+        extra_args_provider: a function that takes a parser and adds arguments
+            to it. It is used for programs to add their own arguments.
+        args_defaults: a dictionary from argument-name to argument-value. It
+            to set already parse arguments.
+    """
+
+    # Initalize and get arguments, timers, and Tensorboard writer.
+    initialize_megatron(extra_args_provider=extra_args_provider,
+                        args_defaults=args_defaults)
+
+    # Adjust the startup time so it reflects the largest value.
+    # This will be closer to what scheduler will see (outside of
+    # image ... launches.
+    global _TRAIN_START_TIME
+    start_time_tensor = get_accelerator().FloatTensor([_TRAIN_START_TIME])
+    torch.distributed.all_reduce(start_time_tensor,
+                                 op=torch.distributed.ReduceOp.MIN)
+    _TRAIN_START_TIME = start_time_tensor.item()
+    print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
+        time.time() - _TRAIN_START_TIME))
+    print_datetime('after megatron is initialized')
+
+    args = get_args()
+    timers = get_timers()
+
+    if args.deepspeed:
+        args.deepspeed_configuration = json.load(
+            open(args.deepspeed_config, 'r', encoding='utf-8'))
+        if "curriculum_learning" in args.deepspeed_configuration and \
+            "enabled" in args.deepspeed_configuration["curriculum_learning"]:
+            args.curriculum_learning_legacy = args.deepspeed_configuration[ \
+                "curriculum_learning"]["enabled"]
+        if args.curriculum_learning_legacy and not args.no_pipeline_parallel:
+            from deepspeed.runtime.data_pipeline.curriculum_scheduler \
+                import CurriculumScheduler
+            args.curriculum_scheduler = CurriculumScheduler( \
+                args.deepspeed_configuration["curriculum_learning"])
+        if "compression_training" in args.deepspeed_configuration:
+            args.compression_training = True
+
+    # Model, optimizer, and learning rate.
+    timers('model-and-optimizer-setup').start()
+    model, optimizer, lr_scheduler = setup_model_and_optimizer(
+        model_provider, teacher=False, data_post_process=data_post_process,
+        build_train_valid_test_datasets_provider=None)
+    timers('model-and-optimizer-setup').stop()
+    print_datetime('after model, optimizer, and learning rate '
+                   'scheduler are built')
+
+    # Data stuff.
+    timers('train/valid/test-data-iterators-setup').start()
+    if args.virtual_pipeline_model_parallel_size is not None:
+        all_data_iterators = [
+            train_valid_test_dataloader_provider()
+            for _ in range(len(model))
+        ]
+        train_data_iterator = [data_iterators[0] for data_iterators in all_data_iterators]
+        valid_data_iterator = [data_iterators[1] for data_iterators in all_data_iterators]
+        test_data_iterator = [data_iterators[2] for data_iterators in all_data_iterators]
+    else:
+        train_data_iterator, valid_data_iterator, test_data_iterator \
+            = train_valid_test_dataloader_provider()
+    if args.data_efficiency_curriculum_learning:
+        if args.deepspeed_dataloader is not None:
+            # We use args to pass the deepspeed_dataloader because adding
+            # output to setup_model_and_optimizer will break the API for other
+            # cases. We clear args.deepspeed_dataloader after updating
+            # train_data_iterator because args will be saved in checkpoint and
+            # attempting to save the whole deepspeed_dataloader will lead to
+            # "AttributeError: Can't pickle local object...".
+            train_data_iterator = iter(args.deepspeed_dataloader)
+            args.deepspeed_dataloader = None
+        else:
+            train_data_iterator = None
+    timers('train/valid/test-data-iterators-setup').stop()
+    print_datetime('after dataloaders are built')
+
+    # args.teacher_model is used as global variable to pass the teacher model
+    # for knowledge distillation. Users do not need to set it in the command
+    # line to use kd, but users do need to provide teacher model configurations
+    # like args.num_layers_teacher as described in setup_teacher_model()
+    args.teacher_model = None
+    if args.mos or args.kd: # Set up teacher model
+        args.teacher_model = setup_teacher_model(args, model_provider)
+
+    # Print setup timing.
+    print_rank_0('done with setup ...')
+    timers.log(['model-and-optimizer-setup', 'train/valid/test-data-iterators-setup'])
+    print_rank_0('training ...')
+
+    iteration = 0
+    if args.do_train and args.train_iters > 0:
+        iteration = train(forward_step_func,
+                          model, optimizer, lr_scheduler,
+                          train_data_iterator, valid_data_iterator)
+    print_datetime('after training is done')
+
+    if args.do_valid:
+        prefix = 'the end of training for val data'
+        evaluate_and_print_results(prefix, forward_step_func,
+                                   valid_data_iterator, model,
+                                   iteration, False)
+    
+    # Clean the model and do evaluation again
+    if args.compression_training:
+        model = [redundancy_clean(model[0], args.deepspeed_config, mpu)]
+        if args.do_valid:
+            prefix = 'the end of training and after model cleaning for val data'
+            evaluate_and_print_results(prefix, forward_step_func,
+                                    valid_data_iterator, model,
+                                    iteration, False)
+
+
+    if args.save and iteration != 0:
+        save_checkpoint(iteration, model, optimizer, lr_scheduler)
+
+    if args.do_test:
+        # Run on test data.
+        prefix = 'the end of training for test data'
+        evaluate_and_print_results(prefix, forward_step_func,
+                                   test_data_iterator, model,
+                                   0, True, test=True)
+
+
 def update_train_iters(args):
 
     # For iteration-based training, we don't need to do anything

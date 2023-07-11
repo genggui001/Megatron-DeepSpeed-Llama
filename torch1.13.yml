@@ -1,4 +1,4 @@
-name: /root/miniconda3/envs/torch1.13
+name: torch1.13
 channels:
   - xformers
   - pytorch

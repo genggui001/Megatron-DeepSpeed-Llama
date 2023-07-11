@@ -44,8 +44,9 @@ except ImportError:
 
 
 class RotaryEmbedding(torch.nn.Module):
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+    def __init__(self, dim, max_position_embeddings=16384, base=10000, alpha=8, device=None):
         super().__init__()
+        base = base * alpha ** (dim / (dim-2))
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
         self.register_buffer("inv_freq", inv_freq)
 
@@ -902,7 +903,7 @@ class LlamaModelPipe(PipelineModule, MegatronModule):
             loss_fn=CrossEntropy,
             topology=topo,
             activation_checkpoint_interval=interval,
-            partition_method='type:transformer',
+            partition_method='type:transformer|embedding|lmhead',
             checkpointable_layers=[
                 'LlamaParallelTransformerLayerPipe'
             ]

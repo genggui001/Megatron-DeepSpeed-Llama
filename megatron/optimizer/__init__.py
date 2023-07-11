@@ -21,8 +21,11 @@ else:
     from torch.optim import SGD
 
 
+import numpy as np
+
 from megatron import get_args
 from megatron.model import LayerNorm
+from megatron.model.llama_model import RMSNorm
 
 from .grad_scaler import ConstantGradScaler, DynamicGradScaler
 from .optimizer import Float16OptimizerWithFloat16Params, FP32Optimizer
@@ -38,7 +41,7 @@ def _get_params_for_weight_decay_optimization(modules):
     
     for module in modules:
         for module_ in module.modules():
-            if isinstance(module_, LayerNorm):
+            if isinstance(module_, LayerNorm) or isinstance(module_, RMSNorm):
                 no_weight_decay_params['params'].extend(
                     [p for p in list(module_._parameters.values())
                     if p is not None])
@@ -49,7 +52,32 @@ def _get_params_for_weight_decay_optimization(modules):
                 no_weight_decay_params['params'].extend(
                     [p for n, p in list(module_._parameters.items())
                     if p is not None and n == 'bias'])
-    return weight_decay_params, no_weight_decay_params
+                
+    # XXX: temp hack to workaround the crash in apex FusedAdam's multi_tensor_applier
+    #
+    # it crashes when the param count is larger than a certain size which we hit at 200B over 80
+    # A100 gpus - I think around 2.7B per gpu, so halving it works around the issue
+    # print(len(weight_decay_params['params']))
+    param_count = len(weight_decay_params['params'])
+    
+    # first_half = weight_decay_params['params'][:param_count // 2]
+    # second_half = weight_decay_params['params'][param_count // 2:]
+
+    # first_half =  { 'params': first_half }
+    # second_half = { 'params': second_half }
+
+    all_weight_decay_params = []
+
+    for pidx, w_idxs in enumerate(np.array_split(range(param_count), 2)):
+        all_weight_decay_params.append({
+            'params': [ weight_decay_params['params'][w_idx]  for w_idx in w_idxs],
+            'name': f'weight_decay_params_{pidx}'
+        })
+
+    all_weight_decay_params.append(no_weight_decay_params)
+
+    return tuple(all_weight_decay_params)
+
 
 def get_megatron_optimizer(model):
     args = get_args()
