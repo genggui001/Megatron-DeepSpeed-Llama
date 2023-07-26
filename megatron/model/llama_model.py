@@ -42,13 +42,14 @@ try:
 except ImportError:
     xops = None
 
-
+# https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/
+# ntkaware_scaled_rope
 class RotaryEmbedding(torch.nn.Module):
-    def __init__(self, dim, max_position_embeddings=16384, base=10000, alpha=8, device=None):
+    def __init__(self, dim, max_position_embeddings=16384, base=10000, alpha=1, device=None):
         super().__init__()
         base = base * alpha ** (dim / (dim-2))
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
-        self.register_buffer("inv_freq", inv_freq)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
 
         # Build here to make `torch.jit.trace` work.
         self.max_seq_len_cached = max_position_embeddings
@@ -297,9 +298,11 @@ class LlamaParallelAttention(MegatronModule):
     """
 
     def __init__(self, init_method,
-                 output_layer_init_method, layer_number,
-                 attention_type=AttnType.self_attn,
-                 attn_mask_type=AttnMaskType.causal):
+        output_layer_init_method, layer_number,
+        attention_type=AttnType.self_attn,
+        attn_mask_type=AttnMaskType.causal,
+
+    ):
         super(LlamaParallelAttention, self).__init__()
 
         assert attention_type == AttnType.self_attn
@@ -357,8 +360,7 @@ class LlamaParallelAttention(MegatronModule):
             coeff)
 
         ## Rotary Position Embedding
-        self.rotary_emb = RotaryEmbedding(self.hidden_size_per_attention_head)
-
+        self.rotary_emb = RotaryEmbedding(self.hidden_size_per_attention_head, alpha=args.rope_alpha)
         # Output.
         self.dense = mpu.RowParallelLinear(
             projection_size,
