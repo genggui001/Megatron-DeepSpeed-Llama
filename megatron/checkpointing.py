@@ -241,8 +241,7 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler, loss_dict=None):
 
             #按照 分数, iteration 排序 小的在前面
             checkpoint_path_iterations = sorted(checkpoint_path_iterations, key=lambda x:(x[0], x[1]))
-            print(checkpoint_path_iterations)
-
+            
             while len(checkpoint_path_iterations) + 1 > args.save_total_limit:
                 print_rank_0('Delete Checkpoint ' + checkpoint_path_iterations[0][-1])
                 shutil.rmtree(checkpoint_path_iterations[0][-1], ignore_errors=True)
