@@ -95,6 +95,7 @@ LR_WARMUP_SAMPLES=64  # 375M tokens
 
 OPTIMIZER_ARGS=" \
     --optimizer adam \
+    --optimizer-split-size 1 \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
@@ -138,6 +139,8 @@ GPT_ARGS=" \
 
 OUTPUT_ARGS=" \
     --log-interval 1 \
+    --save-total-limit 2 \
+    --metric-for-best-model 'lm loss' \
     --save-interval $SAVE_INTERVAL \
     --eval-interval $SAVE_INTERVAL \
     --eval-iters 32 \
