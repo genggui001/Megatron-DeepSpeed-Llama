@@ -96,6 +96,7 @@ LR_WARMUP_SAMPLES=64  # 375M tokens
 
 OPTIMIZER_ARGS=" \
     --optimizer adam \
+    --optimizer-split-size 1 \
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \

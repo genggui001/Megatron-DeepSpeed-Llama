@@ -68,7 +68,7 @@ def _get_params_for_weight_decay_optimization(modules):
 
     all_weight_decay_params = []
 
-    for pidx, w_idxs in enumerate(np.array_split(range(param_count), 2)):
+    for pidx, w_idxs in enumerate(np.array_split(range(param_count), args.optimizer_split_size)):
         all_weight_decay_params.append({
             'params': [ weight_decay_params['params'][w_idx]  for w_idx in w_idxs],
             'name': f'weight_decay_params_{pidx}'

@@ -27,6 +27,7 @@ import shutil
 
 from megatron import (get_args,
                       is_rank_0,
+                      is_last_rank,
                       mpu,
                       print_rank_0,
                       update_num_microbatches,
@@ -196,9 +197,9 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler, loss_dict=None):
 
     # save loss_dict
     loss_dict_dirname = os.path.join(args.save, "loss_dict")
-    if is_rank_0():
+    if is_last_rank():
         os.makedirs(loss_dict_dirname, exist_ok=True)
-        torch.save(loss_dict, os.path.join(loss_dict_dirname, "{:7d}.pt" % iteration))
+        torch.save(loss_dict, os.path.join(loss_dict_dirname, "%d.pt" % iteration))
 
     # Wait so everyone is done (not necessary)
     if torch.distributed.is_initialized():
@@ -225,7 +226,7 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler, loss_dict=None):
                 # 读取metric并排序
                 metric = -10000000
                 if args.metric_for_best_model is not None:
-                    loss_dict_filename = os.path.join(loss_dict_dirname, "{:7d}.pt" % tmp_iteration)
+                    loss_dict_filename = os.path.join(loss_dict_dirname, "%d.pt" % tmp_iteration)
                     
                     if os.path.exists(loss_dict_filename):
                         tmp_loss_dict = torch.load(loss_dict_filename, map_location="cpu")
@@ -333,7 +334,7 @@ def load_checkpoint(model, optimizer, lr_scheduler, load_arg='load', strict=True
     if args.deepspeed:
         if args.finetune:
             loaded_dir, state_dict = model[0].load_checkpoint(load_dir,
-                load_module_strict=strict, load_optimizer_states=False,
+                load_module_strict=False, load_optimizer_states=False,
                 load_lr_scheduler_states=False, load_module_only=True)
         else:
             loaded_dir, state_dict = model[0].load_checkpoint(load_dir,

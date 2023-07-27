@@ -490,6 +490,8 @@ def _add_training_args(parser):
     group.add_argument('--optimizer', type=str, default='adam',
                        choices=['adam', 'sgd'],
                        help='Optimizer function')
+    group.add_argument('--optimizer-split-size', type=int, default=1,
+                       help='optimizer split size when model size > 100b')
     group.add_argument('--dataloader-type', type=str, default=None,
                        choices=['single', 'cyclic'],
                        help='Single pass vs multiple pass data loader')
