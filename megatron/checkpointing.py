@@ -111,7 +111,7 @@ def get_checkpoint_tracker_filename(checkpoints_path):
     return os.path.join(checkpoints_path, 'latest_checkpointed_iteration.txt')
 
 
-def save_checkpoint(iteration, model, optimizer, lr_scheduler):
+def save_checkpoint(iteration, model, optimizer, lr_scheduler, loss_dict=None):
     """Save a model checkpoint."""
     args = get_args()
 
@@ -194,6 +194,12 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
         with open(tracker_filename, 'w') as f:
             f.write(str(iteration))
 
+    # save loss_dict
+    loss_dict_dirname = os.path.join(args.save, "loss_dict")
+    if is_rank_0():
+        os.makedirs(loss_dict_dirname, exist_ok=True)
+        torch.save(loss_dict, os.path.join(loss_dict_dirname, "{:7d}.pt" % iteration))
+
     # Wait so everyone is done (not necessary)
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
@@ -204,21 +210,40 @@ def save_checkpoint(iteration, model, optimizer, lr_scheduler):
 
             for checkpoint_path in glob(os.path.join(args.save, "global_step*")):
                 try:
-                    iteration = re.search(r"global_step(\d+)$", checkpoint_path)
-                    if iteration is None:
-                        iteration = 0
+                    tmp_iteration = re.search(r"global_step(\d+)$", checkpoint_path)
+                    if tmp_iteration is None:
+                        tmp_iteration = 0
                     else:
-                        iteration = int(iteration.group(1))
+                        tmp_iteration = int(tmp_iteration.group(1))
                 except:
-                    iteration = 0
+                    tmp_iteration = 0
+
+                # skip now iteration
+                if tmp_iteration == iteration:
+                    continue
                 
-                checkpoint_path_iterations.append((iteration, checkpoint_path))
+                # 读取metric并排序
+                metric = -10000000
+                if args.metric_for_best_model is not None:
+                    loss_dict_filename = os.path.join(loss_dict_dirname, "{:7d}.pt" % tmp_iteration)
+                    
+                    if os.path.exists(loss_dict_filename):
+                        tmp_loss_dict = torch.load(loss_dict_filename, map_location="cpu")
+                        if tmp_loss_dict is not None and args.metric_for_best_model in tmp_loss_dict:
+                            if "loss" in args.metric_for_best_model:
+                                # loss 最大的排在第一位
+                                metric = -tmp_loss_dict[args.metric_for_best_model].item()
+                            else:
+                                metric = tmp_loss_dict[args.metric_for_best_model].item()
 
-            checkpoint_path_iterations = sorted(checkpoint_path_iterations, key=lambda x:x[0])
+                checkpoint_path_iterations.append((metric, tmp_iteration, checkpoint_path))
 
-            while len(checkpoint_path_iterations) > args.save_total_limit:
-                print_rank_0('Delete Checkpoint ' + checkpoint_path_iterations[0][1])
-                shutil.rmtree(checkpoint_path_iterations[0][1], ignore_errors=True)
+            #按照（分数, iteration) 排序 小的在前面
+            checkpoint_path_iterations = sorted(checkpoint_path_iterations, key=lambda x:(x[0], x[1]))
+
+            while len(checkpoint_path_iterations) + 1 > args.save_total_limit:
+                print_rank_0('Delete Checkpoint ' + checkpoint_path_iterations[0][-1])
+                shutil.rmtree(checkpoint_path_iterations[0][-1], ignore_errors=True)
                 checkpoint_path_iterations.pop(0)
                 
     # Wait so everyone is done (not necessary)

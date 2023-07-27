@@ -585,6 +585,8 @@ def _add_checkpointing_args(parser):
                        help='Output directory to save checkpoints to.')
     group.add_argument('--save-total-limit', type=int, default=2,
                        help='save total limit.')
+    group.add_argument('--metric-for-best-model', type=str, default=None,
+                       help='metric for best model')
     group.add_argument('--save-interval', type=int, default=None,
                        help='Number of iterations between checkpoint saves.')
     group.add_argument('--no-save-optim', action='store_true', default=None,

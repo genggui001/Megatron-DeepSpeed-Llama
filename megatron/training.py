@@ -1122,13 +1122,13 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
     return report_memory_flag
 
 
-def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler):
+def save_checkpoint_and_time(iteration, model, optimizer, lr_scheduler, loss_dict=None):
     timers = get_timers()
     # Extra barrier is added to make sure
     # all ranks report the max time.
     torch.distributed.barrier()
     timers('save-checkpoint').start()
-    save_checkpoint(iteration, model, optimizer, lr_scheduler)
+    save_checkpoint(iteration, model, optimizer, lr_scheduler, loss_dict)
     torch.distributed.barrier()
     timers('save-checkpoint').stop()
     checkpoint_throughput_calculator(model, timers('save-checkpoint').elapsed(reset=False))
@@ -1235,10 +1235,11 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
                                               lr_scheduler)
 
         # Evaluation
+        eval_loss_dict = None
         if args.eval_interval and iteration % args.eval_interval == 0 and \
            args.do_valid:
             prefix = 'iteration {}'.format(iteration)
-            evaluate_and_print_results(prefix, forward_step_func,
+            eval_loss_dict = evaluate_and_print_results(prefix, forward_step_func,
                                        valid_data_iterator, model,
                                        iteration, False)
 
@@ -1247,7 +1248,7 @@ def train(forward_step_func, model, optimizer, lr_scheduler,
         if args.save and args.save_interval and \
            iteration % args.save_interval == 0:
             save_checkpoint_and_time(iteration, model, optimizer,
-                                     lr_scheduler)
+                                     lr_scheduler, eval_loss_dict)
             saved_checkpoint = True
 
         # Exiting based on duration
@@ -1387,6 +1388,8 @@ def evaluate_and_print_results(prefix, forward_step_func,
     print_rank_last('-' * length)
     print_rank_last(string)
     print_rank_last('-' * length)
+
+    return total_loss_dict
 
 
 def cyclic_iter(iter):

@@ -973,8 +973,8 @@ class LlamaModel(MegatronModule):
             if get_key_value:
                 hidden_states, presents = hidden_states
 
-            if self.add_pooler:
-                hidden_states = self.pooler(hidden_states, pooling_sequence_index)
+            # if self.add_pooler:
+            #     hidden_states = self.pooler(hidden_states, pooling_sequence_index)
 
             hidden_states = self.lm_head(hidden_states)
 
