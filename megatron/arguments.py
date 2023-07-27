@@ -308,9 +308,9 @@ def _add_network_size_args(parser):
                        'if not provided.')
     group.add_argument('--rope-alpha', type=int, default=1,
                        help='rope-alpha')
-    group.add_argument('--num-attention-heads', type=int, default=None,
-                       help='Number of transformer attention heads.')
-    
+    group.add_argument('--max-position-embeddings', type=int, default=None,
+                       help='Maximum number of position embeddings to use. '
+                       'This is the size of position embedding.')
     group.add_argument('--make-vocab-size-divisible-by', type=int, default=128,
                        help='Pad the vocab size to be divisible by this value.'
                        'This is added for computational efficieny reasons.')

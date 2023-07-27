@@ -88,7 +88,7 @@ SEQ_LEN=2048
 SP=12
 
 ADAPTER_SIZE=0
-SAVE_INTERVAL=256
+SAVE_INTERVAL=32
 
 TRAIN_SAMPLES=9_437_184  # 450B tokens
 LR_DECAY_SAMPLES=8_437_120  # Decay for the first 410B tokens then continue at fixed --min-lr
@@ -139,6 +139,8 @@ GPT_ARGS=" \
 
 OUTPUT_ARGS=" \
     --log-interval 1 \
+    --save-total-limit 2 \
+    --metric-for-best-model 'lm loss' \
     --save-interval $SAVE_INTERVAL \
     --eval-interval $SAVE_INTERVAL \
     --eval-iters 32 \
