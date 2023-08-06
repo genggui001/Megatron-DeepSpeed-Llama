@@ -507,6 +507,8 @@ def _add_training_args(parser):
                        help='Use Tutel optimization for MoE')
     group.add_argument('--inference', action='store_true',
                        help='Very basic inference mode: not allocating optim/lr - requires ZERO_STAGE=0')
+    group.add_argument('--pp-partition-method', type=str, default=None,
+                       help="Use to override the pipeline stages partitioning method. e.g., 'type:transformer|embedding'")
 
     return parser
 

@@ -38,9 +38,9 @@ from deepspeed.accelerator import get_accelerator
 from deepspeed.pipe import PipelineModule, LayerSpec
 
 try:
-    from xformers import ops as xops
+    from flash_attn import flash_attn_func
 except ImportError:
-    xops = None
+    flash_attn_func = None
 
 # https://www.reddit.com/r/LocalLLaMA/comments/14lz7j5/ntkaware_scaled_rope_allows_llama_models_to_have/
 # ntkaware_scaled_rope
@@ -409,14 +409,16 @@ class LlamaParallelAttention(MegatronModule):
         cos, sin = self.rotary_emb(value_layer, seq_len=new_tensor_shape[0])
         query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin, offset=0)
 
-        if self.apply_use_flash_attention == True and xops is not None and layer_past is None:
-            query_states = query_layer.transpose(1, 2)
-            key_states = key_layer.transpose(1, 2)
-            value_states = value_layer.transpose(1, 2)
-            attn_output = xops.memory_efficient_attention(
+        if self.apply_use_flash_attention == True and flash_attn_func is not None and layer_past is None:
+            query_states = query_layer.transpose(1, 2) #[b, sq, np, hn]
+            key_states = key_layer.transpose(1, 2) #[b, sq, np, hn]
+            value_states = value_layer.transpose(1, 2) #[b, sq, np, hn]
+
+            attn_output = flash_attn_func(
                 query_states, key_states, value_states, 
-                attn_bias=xops.LowerTriangularMask(), p=0.0
+                dropout_p=0.0, softmax_scale=None, causal=True
             )
+
             # (b, sq, np, hn) —> [sq, b, np, hn]
             context_layer = attn_output.permute(1, 0, 2, 3).contiguous()
         else:
@@ -900,12 +902,17 @@ class LlamaModelPipe(PipelineModule, MegatronModule):
                                              num_mp=mpu.get_tensor_model_parallel_world_size(),
                                              num_dp=mpu.get_data_parallel_world_size())
 
+        if args.pp_partition_method is not None:
+            partition_method = args.pp_partition_method
+        else:
+            partition_method = 'type:transformer'
+
         super().__init__(
             layers=self.specs,
             loss_fn=CrossEntropy,
             topology=topo,
             activation_checkpoint_interval=interval,
-            partition_method='type:transformer|embedding|lmhead',
+            partition_method=partition_method,
             checkpointable_layers=[
                 'LlamaParallelTransformerLayerPipe'
             ]
