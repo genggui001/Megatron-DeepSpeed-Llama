@@ -78,6 +78,12 @@ def mkdir_json_dataset(
 ):
     generator = np.random.default_rng(seed)
 
+    assert len(json_data_paths) == len(probabilities)
+
+    for json_data_path in json_data_paths:
+        assert len(json_data_path)
+
+
     json_datasets = [
         [
             load_dataset(
