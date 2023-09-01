@@ -452,9 +452,9 @@ class LlamaParallelAttention(MegatronModule):
         query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin)
 
         if self.apply_use_flash_attention == True and flash_attn_func is not None and layer_past is None:
-            query_states = query_layer.transpose(0, 1) #[b, sq, np, hn]
-            key_states = key_layer.transpose(0, 1) #[b, sq, np or nkvp, hn]
-            value_states = value_layer.transpose(0, 1) #[b, sq, np or nkvp, hn]
+            query_states = query_layer.transpose(0, 1).contiguous() #[b, sq, np, hn]
+            key_states = key_layer.transpose(0, 1).contiguous() #[b, sq, np or nkvp, hn]
+            value_states = value_layer.transpose(0, 1).contiguous() #[b, sq, np or nkvp, hn]
 
             attn_output = flash_attn_func(
                 query_states, key_states, value_states, 
