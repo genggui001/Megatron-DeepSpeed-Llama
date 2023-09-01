@@ -57,9 +57,9 @@ echo "START TIME: $START_DATE"
 
 variant=main
 
-LOAD_CHECKPOINT_PATH=/mnt/petrelfs/xuekui/pretrain_weights/nlp/baichuan-7B-hf-megatron-states
+LOAD_CHECKPOINT_PATH=/mnt/petrelfs/xuekui/pretrain_weights/nlp/Llama-2-70b-hf-megatron-states
 
-DATA_OUTPUT_PATH=./model_dir/baichuan_7b_eval
+DATA_OUTPUT_PATH=./model_dir/llama2_70b_en_eval
 CHECKPOINT_PATH=$DATA_OUTPUT_PATH/checkpoints/$variant
 REPO_PATH=$DATA_OUTPUT_PATH/experiment
 TENSORBOARD_PATH=$REPO_PATH/tensorboard/$variant
@@ -68,7 +68,7 @@ mkdir -p $LOGS_PATH
 
 KILL_SWITCH_PATH=$REPO_PATH/kill-switch
 
-DATA_PATH="/mnt/petrelfs/xuekui/dataset/pretrain_data/baichuan/lm_zh-cn_wikipedia_text_document"
+DATA_PATH="/mnt/petrelfs/xuekui/dataset/pretrain_data/en/common_crawl_2019_30_tmp_text_document"
 TOKENIZER_NAME_OR_PATH=$LOAD_CHECKPOINT_PATH/tokenizer
 
 
@@ -78,10 +78,11 @@ PP_SIZE=4
 MICRO_BATCH_SIZE=1  # was MBS=1 till GBS=784
 GLOBAL_BATCH_SIZE=128  # 4.2M tokens. It is larger than the initial plan of 3.2M tokens to get higher throughput
 
-NHIDDEN=4096
-FFN_HIDDEN_SIZE=11008
-NLAYERS=32
-NHEADS=32
+NHIDDEN=8192
+FFN_HIDDEN_SIZE=28672
+NLAYERS=80
+NHEADS=64
+NKVHEADS=8
 SEQ_LEN=2048
 
 SP=12
@@ -101,6 +102,7 @@ GPT_ARGS=" \
     --hidden-size $NHIDDEN \
     --ffn-hidden-size $FFN_HIDDEN_SIZE \
     --num-attention-heads $NHEADS \
+    --num-key-value-heads $NKVHEADS \
     --seq-length $SEQ_LEN \
     --max-position-embeddings $SEQ_LEN \
     --micro-batch-size $MICRO_BATCH_SIZE \
@@ -109,11 +111,10 @@ GPT_ARGS=" \
     --vocab-file $TOKENIZER_NAME_OR_PATH \
     --loss-scale $SP \
     --init-method-std 0.0048 \
-    --bf16 \
+    --fp16 \
     --seed 42 \
     --checkpoint-activations \
-    --pad-vocab-size-to 64256 \
-    --layernorm-epsilon 1e-06 \
+    --pad-vocab-size-to 32128 \
     $EXIT_OPTS \
     "
 
@@ -147,8 +148,13 @@ cat <<EOT > $config_json
   "checkpoint": {
     "load_universal": false
   },
-  "bf16": {
-    "enabled": true
+  "fp16": {
+    "enabled": true,
+    "loss_scale": 0,
+    "loss_scale_window": 500,
+    "hysteresis": 2,
+    "min_loss_scale": 1,
+    "initial_scale_power": $SP
   },
   "steps_per_print": 2000,
   "wall_clock_breakdown": false

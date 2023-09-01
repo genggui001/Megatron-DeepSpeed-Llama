@@ -59,6 +59,13 @@ loss on commoncrawl (和论文基本一致)
 validation loss at the end of training for val data | lm loss value: 1.519600E+00 | lm loss PPL: 4.570395E+00 |
 ```
 
+[meta-llama-Llama-2-70b-hf-megatron-states](https://huggingface.co/genggui001/decapoda-research-llama-65b-megatron-states)
+
+loss on commoncrawl (和论文基本一致)
+```
+validation loss at the end of training for val data | lm loss value: 1.482514E+00 | lm loss PPL: 4.404004E+00 |
+```
+
 #### (2) Chinese-LLaMA-Plus
 原始权重：[Chinese-LLaMA-Alpaca](https://github.com/ymcui/Chinese-LLaMA-Alpaca)
 

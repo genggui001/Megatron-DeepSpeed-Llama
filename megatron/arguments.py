@@ -221,6 +221,12 @@ def parse_args(extra_args_provider=None, defaults={},
         assert args.hidden_size % args.num_attention_heads == 0
         args.kv_channels = args.hidden_size // args.num_attention_heads
 
+    # add num_key_value_heads
+    if args.num_key_value_heads is None:
+        args.num_key_value_heads = args.num_attention_heads
+    
+    assert args.num_attention_heads % args.num_key_value_heads == 0
+
     if args.seq_length is not None:
         assert args.encoder_seq_length is None
         args.encoder_seq_length = args.seq_length
@@ -301,6 +307,8 @@ def _add_network_size_args(parser):
                        'This is set to 4*hidden-size if not provided')
     group.add_argument('--num-attention-heads', type=int, default=None,
                        help='Number of transformer attention heads.')
+    group.add_argument('--num-key-value-heads', type=int, default=None,
+                       help='Number of transformer key value heads.')
     group.add_argument('--kv-channels', type=int, default=None,
                        help='Projection weights dimension in multi-head '
                        'attention. This is set to '

@@ -290,6 +290,18 @@ class LlamaParallelMLP(MegatronModule):
         return output
 
 
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
 class LlamaParallelAttention(MegatronModule):
     """Parallel self-attention layer abstract class.
 
@@ -324,26 +336,36 @@ class LlamaParallelAttention(MegatronModule):
         self.output_layer_init_method = output_layer_init_method
 
         self.num_attention_heads = args.num_attention_heads
-        projection_size = args.kv_channels * args.num_attention_heads
+        self.num_key_value_heads = args.num_key_value_heads
+        self.num_key_value_groups = self.num_attention_heads // self.num_key_value_heads
+
+        projection_size = args.kv_channels * self.num_attention_heads
+        kv_projection_size = args.kv_channels * self.num_key_value_heads
 
         # Per attention head and per partition values.
         world_size = mpu.get_tensor_model_parallel_world_size()
         self.hidden_size_per_partition = mpu.divide(projection_size,
                                                     world_size)
+        
         self.hidden_size_per_attention_head = mpu.divide(
             projection_size, args.num_attention_heads)
+            
         self.num_attention_heads_per_partition = mpu.divide(
             args.num_attention_heads, world_size)
+        
+        self.num_key_value_heads_per_partition = mpu.divide(
+            args.num_key_value_heads, world_size)
 
         # Strided linear layer.
-        if attention_type == AttnType.self_attn:
-            self.query_key_value = mpu.ColumnParallelLinear(
-                args.hidden_size,
-                3 * projection_size,
-                bias=False,
-                skip_bias_add=True,
-                gather_output=False,
-                init_method=self.init_method)
+        assert attention_type == AttnType.self_attn
+
+        self.query_key_value = mpu.ColumnParallelLinear(
+            args.hidden_size,
+            projection_size + 2 * kv_projection_size,
+            bias=False,
+            skip_bias_add=True,
+            gather_output=False,
+            init_method=self.init_method)
 
         coeff = None
         self.norm_factor = math.sqrt(self.hidden_size_per_attention_head)
@@ -384,24 +406,41 @@ class LlamaParallelAttention(MegatronModule):
         # Query, Key, and Value
         # =====================
 
-        if self.attention_type == AttnType.self_attn:
-            # Attention heads [sq, b, h] --> [sq, b, (np * 3 * hn)]
-            mixed_x_layer, _ = self.query_key_value(hidden_states)
+        # assert self.attention_type == AttnType.self_attn
 
-            # [sq, b, (np * 3 * hn)] --> [sq, b, np, 3 * hn]
-            new_tensor_shape = mixed_x_layer.size()[:-1] + \
-                               (self.num_attention_heads_per_partition,
-                                3 * self.hidden_size_per_attention_head)
-            mixed_x_layer = mixed_x_layer.view(*new_tensor_shape)
+        # Attention heads [sq, b, h] --> [sq, b, (nkvp * (ng + 2) * hn)]
+        mixed_x_layer, _ = self.query_key_value(hidden_states)
 
-            # [sq, b, np, 3 * hn] --> 3 [sq, b, np, hn]
-            (query_layer,
-             key_layer,
-             value_layer) = mpu.split_tensor_along_last_dim(mixed_x_layer, 3)
+        # [sq, b, (nkvp * (ng + 2) * hn)] --> [sq, b, nkvp, (ng + 2) * hn]
+        new_tensor_shape = mixed_x_layer.size()[:-1] + \
+                            (self.num_key_value_heads_per_partition,
+                            (self.num_key_value_groups + 2) * self.hidden_size_per_attention_head)
+        mixed_x_layer = mixed_x_layer.view(*new_tensor_shape)
+
+        # [sq, b, nkvp, (ng + 2) * hn] -->  [sq, b, nkvp, ng * hn] [sq, b, nkvp, hn] [sq, b, nkvp, hn]
+        # (query_layer,
+        #     key_layer,
+        #     value_layer) = mpu.split_tensor_along_last_dim(mixed_x_layer, 3)
+        (
+            query_layer,
+            key_layer,
+            value_layer
+        ) = torch.split(
+            mixed_x_layer, [
+                self.num_key_value_groups * self.hidden_size_per_attention_head,
+                self.hidden_size_per_attention_head,
+                self.hidden_size_per_attention_head,
+            ], 
+            dim=-1
+        )
+        # [sq, b, nkvp, ng * hn] -> [sq, b, nkvp * ng, hn]
+        new_tensor_shape = query_layer.size()[:-2] + (self.num_key_value_heads_per_partition * self.num_key_value_groups, self.hidden_size_per_attention_head)
+        query_layer = query_layer.reshape(*new_tensor_shape)
+
         # ==================================
         # Rotary Position Embedding
         # ==================================
-        # [sq, b, np, hn] --> [b, np, sq, hn] TODO optimize the permute of dimension back and forth
+        # [sq, b, np or nkvp, hn] --> [b, np or nkvp, sq, hn] TODO optimize the permute of dimension back and forth
         query_layer = query_layer.permute(1, 2, 0, 3)
         key_layer = key_layer.permute(1, 2, 0, 3)
         value_layer = value_layer.permute(1, 2, 0, 3)
@@ -411,8 +450,8 @@ class LlamaParallelAttention(MegatronModule):
 
         if self.apply_use_flash_attention == True and flash_attn_func is not None and layer_past is None:
             query_states = query_layer.transpose(1, 2) #[b, sq, np, hn]
-            key_states = key_layer.transpose(1, 2) #[b, sq, np, hn]
-            value_states = value_layer.transpose(1, 2) #[b, sq, np, hn]
+            key_states = key_layer.transpose(1, 2) #[b, sq, np or nkvp, hn]
+            value_states = value_layer.transpose(1, 2) #[b, sq, np or nkvp, hn]
 
             attn_output = flash_attn_func(
                 query_states, key_states, value_states, 
@@ -422,6 +461,10 @@ class LlamaParallelAttention(MegatronModule):
             # (b, sq, np, hn) —> [sq, b, np, hn]
             context_layer = attn_output.permute(1, 0, 2, 3).contiguous()
         else:
+            # repeat_kv
+            key_layer = repeat_kv(key_layer, self.num_key_value_groups)
+            value_layer = repeat_kv(value_layer, self.num_key_value_groups)
+
             # [b, np, sq, hn] --> [sq, b, np, hn] TODO optimize the permute of dimension back and forth
             query_layer = query_layer.permute(2, 0, 1, 3).contiguous()
             key_layer = key_layer.permute(2, 0, 1, 3).contiguous()
