@@ -57,8 +57,8 @@ class RotaryEmbedding(torch.nn.Module):
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos()[None, None, :, :], persistent=False)
-        self.register_buffer("sin_cached", emb.sin()[None, None, :, :], persistent=False)
+        self.register_buffer("cos_cached", emb.cos()[:, None, None, :], persistent=False)
+        self.register_buffer("sin_cached", emb.sin()[:, None, None, :], persistent=False)
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
@@ -69,11 +69,11 @@ class RotaryEmbedding(torch.nn.Module):
             freqs = torch.einsum("i,j->ij", t, self.inv_freq)
             # Different from paper, but it uses a different permutation in order to obtain the same calculation
             emb = torch.cat((freqs, freqs), dim=-1).to(x.device)
-            self.register_buffer("cos_cached", emb.cos()[None, None, :, :], persistent=False)
-            self.register_buffer("sin_cached", emb.sin()[None, None, :, :], persistent=False)
+            self.register_buffer("cos_cached", emb.cos()[:, None, None, :], persistent=False)
+            self.register_buffer("sin_cached", emb.sin()[:, None, None, :], persistent=False)
         return (
-            self.cos_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
-            self.sin_cached[:, :, :seq_len, ...].to(dtype=x.dtype),
+            self.cos_cached[:seq_len, :, :, :].to(dtype=x.dtype),
+            self.sin_cached[:seq_len, :, :, :].to(dtype=x.dtype),
         )
 
 
@@ -84,9 +84,9 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb(q, k, cos, sin, offset: int = 0):
-    cos = cos[..., offset: q.shape[-2] + offset, :]
-    sin = sin[..., offset: q.shape[-2] + offset, :]
+def apply_rotary_pos_emb(q, k, cos, sin):
+    # cos = cos[offset: q.shape[0] + offset :, :, :]
+    # sin = sin[offset: q.shape[0] + offset :, :, :]
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
@@ -292,14 +292,15 @@ class LlamaParallelMLP(MegatronModule):
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
-    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
-    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from ([sq, b, nkvp, hn]) to ([sq, b, np, hn])
     """
-    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    # slen, batch, num_key_value_heads, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
-    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+    return hidden_states.repeat_interleave(
+        n_rep,
+        dim=2
+    )
 
 
 class LlamaParallelAttention(MegatronModule):
@@ -434,24 +435,25 @@ class LlamaParallelAttention(MegatronModule):
             dim=-1
         )
         # [sq, b, nkvp, ng * hn] -> [sq, b, nkvp * ng, hn]
-        new_tensor_shape = query_layer.size()[:-2] + (self.num_key_value_heads_per_partition * self.num_key_value_groups, self.hidden_size_per_attention_head)
-        query_layer = query_layer.reshape(*new_tensor_shape)
+        query_layer = query_layer.view(query_layer.size(0), query_layer.size(1), -1, self.hidden_size_per_attention_head)
 
         # ==================================
         # Rotary Position Embedding
         # ==================================
         # [sq, b, np or nkvp, hn] --> [b, np or nkvp, sq, hn] TODO optimize the permute of dimension back and forth
-        query_layer = query_layer.permute(1, 2, 0, 3)
-        key_layer = key_layer.permute(1, 2, 0, 3)
-        value_layer = value_layer.permute(1, 2, 0, 3)
+        # query_layer = query_layer.permute(1, 2, 0, 3)
+        # key_layer = key_layer.permute(1, 2, 0, 3)
+        # value_layer = value_layer.permute(1, 2, 0, 3)
 
+        # new used
+        # apply_rotary_pos_emb [sq, b, np or nkvp, hn]
         cos, sin = self.rotary_emb(value_layer, seq_len=new_tensor_shape[0])
-        query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin, offset=0)
+        query_layer, key_layer = apply_rotary_pos_emb(query_layer, key_layer, cos, sin)
 
         if self.apply_use_flash_attention == True and flash_attn_func is not None and layer_past is None:
-            query_states = query_layer.transpose(1, 2) #[b, sq, np, hn]
-            key_states = key_layer.transpose(1, 2) #[b, sq, np or nkvp, hn]
-            value_states = value_layer.transpose(1, 2) #[b, sq, np or nkvp, hn]
+            query_states = query_layer.transpose(0, 1) #[b, sq, np, hn]
+            key_states = key_layer.transpose(0, 1) #[b, sq, np or nkvp, hn]
+            value_states = value_layer.transpose(0, 1) #[b, sq, np or nkvp, hn]
 
             attn_output = flash_attn_func(
                 query_states, key_states, value_states, 
@@ -459,16 +461,17 @@ class LlamaParallelAttention(MegatronModule):
             )
 
             # (b, sq, np, hn) —> [sq, b, np, hn]
-            context_layer = attn_output.permute(1, 0, 2, 3).contiguous()
+            context_layer = attn_output.transpose(0, 1).contiguous()
         else:
             # repeat_kv
+            # [sq, b, np, hn]
             key_layer = repeat_kv(key_layer, self.num_key_value_groups)
             value_layer = repeat_kv(value_layer, self.num_key_value_groups)
 
             # [b, np, sq, hn] --> [sq, b, np, hn] TODO optimize the permute of dimension back and forth
-            query_layer = query_layer.permute(2, 0, 1, 3).contiguous()
-            key_layer = key_layer.permute(2, 0, 1, 3).contiguous()
-            value_layer = value_layer.permute(2, 0, 1, 3).contiguous()
+            # query_layer = query_layer.permute(2, 0, 1, 3).contiguous()
+            # key_layer = key_layer.permute(2, 0, 1, 3).contiguous()
+            # value_layer = value_layer.permute(2, 0, 1, 3).contiguous()
 
             # ==================================
             # Adjust key and value for inference
