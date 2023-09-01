@@ -432,10 +432,11 @@ class LlamaParallelAttention(MegatronModule):
                 self.hidden_size_per_attention_head,
                 self.hidden_size_per_attention_head,
             ], 
-            dim=-1
+            dim=3
         )
-        # [sq, b, nkvp, ng * hn] -> [sq, b, nkvp * ng, hn]
-        query_layer = query_layer.view(query_layer.size(0), query_layer.size(1), -1, self.hidden_size_per_attention_head)
+        if self.num_key_value_groups > 0:
+            # [sq, b, nkvp, ng * hn] -> [sq, b, nkvp * ng, hn]
+            query_layer = query_layer.reshape(query_layer.size(0), query_layer.size(1), -1, self.hidden_size_per_attention_head)
 
         # ==================================
         # Rotary Position Embedding
