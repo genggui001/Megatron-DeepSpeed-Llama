@@ -18,7 +18,7 @@
 import random
 import os
 import time
-
+from datetime import timedelta
 import numpy as np
 import torch
 from megatron import fused_kernels
@@ -217,12 +217,16 @@ def _initialize_distributed():
         init_method += master_ip + ':' + master_port
 
         if args.deepspeed or args.ds_inference:
-            deepspeed.init_distributed()
+            deepspeed.init_distributed(
+                timeout=timedelta(minutes=720),
+            )
         else:
             torch.distributed.init_process_group(
                 backend=args.distributed_backend,
                 world_size=args.world_size, rank=args.rank,
-                init_method=init_method)
+                init_method=init_method,
+                timeout=timedelta(minutes=720),
+            )
     # Set the tensor model-parallel, pipeline model-parallel, and
     # data-parallel communicators.
     if device_count > 0:
