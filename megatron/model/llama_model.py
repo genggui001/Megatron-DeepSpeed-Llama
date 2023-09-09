@@ -65,7 +65,7 @@ class RotaryEmbedding(torch.nn.Module):
         if seq_len > self.max_seq_len_cached:
             self.max_seq_len_cached = seq_len
             t = torch.arange(self.max_seq_len_cached, device=x.device, dtype=torch.float32)
-            freqs = torch.einsum("i,j->ij", t, self.inv_freq)
+            freqs = torch.einsum("i,j->ij", t, self.inv_freq.to(x.device))
             # Different from paper, but it uses a different permutation in order to obtain the same calculation
             emb = torch.cat((freqs, freqs), dim=-1).to(x.device)
             self.register_buffer("cos_cached", emb.cos()[:, None, None, :], persistent=False)
